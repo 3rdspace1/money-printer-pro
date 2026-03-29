@@ -3039,10 +3039,10 @@ class YouTube:
                     clip = clip.subclip(start_time, end_time)
             else:
                 clip = clip.fx(vfx.loop, duration=duration)
-            clip = clip.set_fps(30)
+            clip = clip.set_fps(get_video_fps())
         else:
             clip = ImageClip(asset_path)
-            clip = clip.set_duration(duration).set_fps(30)
+            clip = clip.set_duration(duration).set_fps(get_video_fps())
 
         if round((clip.w / clip.h), 4) < 0.5625:
             if get_verbose():
@@ -3094,7 +3094,7 @@ class YouTube:
                 size=(1080, 1920),
             )
             .set_duration(duration)
-            .set_fps(30)
+            .set_fps(get_video_fps())
         )
 
     def _apply_image_motion(self, clip, duration: float, scene_index: int):
@@ -3150,11 +3150,16 @@ class YouTube:
             )
         )
 
-        return CompositeVideoClip([animated], size=(canvas_w, canvas_h)).set_duration(duration).set_fps(30)
+        return CompositeVideoClip([animated], size=(canvas_w, canvas_h)).set_duration(duration).set_fps(get_video_fps())
 
     def _get_scene_durations(self, total_duration: float) -> list[float]:
         """
         Estimates aligned scene durations from the ordered scene units.
+        Uses a weighted approach that accounts for:
+        - Word count (speech time)
+        - Sentence-ending punctuation (natural pauses after .!?؟)
+        - Mid-sentence punctuation (brief pauses for commas, semicolons)
+        - A minimum base time per scene (ensures short dramatic lines get screen time)
 
         Args:
             total_duration (float): total voiceover duration
@@ -3166,14 +3171,24 @@ class YouTube:
         if not scene_units:
             return [max(total_duration, 0.1)]
 
+        # Minimum base weight ensures even a single dramatic word gets ~1.5x
+        # the weight of a bare minimum scene
+        BASE_WEIGHT = 1.5
+        # Sentence-ending punctuation adds a heavier pause weight
+        SENTENCE_END_WEIGHT = 1.2
+        # Mid-sentence punctuation (commas, semicolons, colons) adds a lighter pause
+        MID_PAUSE_WEIGHT = 0.5
+
         def scene_weight(unit: str) -> float:
-            words = re.findall(r"\S+", str(unit or ""), flags=re.UNICODE)
-            punctuation_pauses = len(re.findall(r"[،,؛;:.!?؟…]", str(unit or "")))
-            return max(1.0, len(words) + (punctuation_pauses * 0.35))
+            text = str(unit or "")
+            words = re.findall(r"\S+", text, flags=re.UNICODE)
+            sentence_ends = len(re.findall(r"[.!?؟…]", text))
+            mid_pauses = len(re.findall(r"[،,؛;:]", text))
+            return BASE_WEIGHT + len(words) + (sentence_ends * SENTENCE_END_WEIGHT) + (mid_pauses * MID_PAUSE_WEIGHT)
 
         total_weight = sum(scene_weight(unit) for unit in scene_units)
         raw_durations = [
-            max(0.35, total_duration * (scene_weight(unit) / total_weight))
+            max(0.8, total_duration * (scene_weight(unit) / total_weight))
             for unit in scene_units
         ]
         total_raw = sum(raw_durations) or total_duration or 1.0
@@ -3734,7 +3749,9 @@ class YouTube:
 
     def generate_subtitles(self, audio_path: str) -> str:
         """
-        Generates subtitles for the audio directly from the current script.
+        Generates subtitles for the audio using the configured stt_provider.
+        Falls back to script-based subtitles only when stt_provider is
+        "script_based" or when the chosen provider fails and a script exists.
 
         Args:
             audio_path (str): The path to the audio file.
@@ -3742,16 +3759,33 @@ class YouTube:
         Returns:
             path (str): The path to the generated SRT File.
         """
-        if str(self.script or "").strip():
-            return self.generate_subtitles_from_script(audio_path)
-
-        provider = str(get_stt_provider() or "local_whisper").lower()
+        provider = str(get_stt_provider() or "script_based").lower()
 
         if provider == "local_whisper":
-            return self.generate_subtitles_local_whisper(audio_path)
+            try:
+                return self.generate_subtitles_local_whisper(audio_path)
+            except Exception as e:
+                warning(f"Local Whisper failed: {e}")
+                if str(self.script or "").strip():
+                    warning("Falling back to script-based subtitles.")
+                    return self.generate_subtitles_from_script(audio_path)
+                raise
 
         if provider == "third_party_assemblyai":
-            return self.generate_subtitles_assemblyai(audio_path)
+            try:
+                return self.generate_subtitles_assemblyai(audio_path)
+            except Exception as e:
+                warning(f"AssemblyAI failed: {e}")
+                if str(self.script or "").strip():
+                    warning("Falling back to script-based subtitles.")
+                    return self.generate_subtitles_from_script(audio_path)
+                raise
+
+        if provider == "script_based":
+            if str(self.script or "").strip():
+                return self.generate_subtitles_from_script(audio_path)
+            warning("No script available for script_based subtitles. Trying local_whisper.")
+            return self.generate_subtitles_local_whisper(audio_path)
 
         warning(f"Unknown stt_provider '{provider}'. Falling back to local_whisper.")
         return self.generate_subtitles_local_whisper(audio_path)
@@ -4411,8 +4445,17 @@ class YouTube:
             clip = self._build_visual_clip(asset, scene_duration)
             clips.append(clip)
 
-        final_clip = concatenate_videoclips(clips, method="compose")
-        final_clip = final_clip.set_fps(30)
+        crossfade = get_crossfade_duration()
+        if crossfade > 0 and len(clips) > 1:
+            for i in range(len(clips)):
+                if i > 0:
+                    clips[i] = clips[i].crossfadein(crossfade)
+                if i < len(clips) - 1:
+                    clips[i] = clips[i].crossfadeout(crossfade)
+            final_clip = concatenate_videoclips(clips, method="compose", padding=-crossfade)
+        else:
+            final_clip = concatenate_videoclips(clips, method="compose")
+        final_clip = final_clip.set_fps(get_video_fps())
 
         subtitle_overlay_clips = []
         try:
@@ -4431,8 +4474,10 @@ class YouTube:
             random_song = choose_random_song()
             random_song_clip = AudioFileClip(random_song).set_fps(44100)
 
-            # Turn down volume
-            random_song_clip = random_song_clip.fx(afx.volumex, 0.1)
+            # Audio ducking: lower music when voice is active, raise during pauses
+            random_song_clip = self._apply_audio_ducking(
+                tts_clip, random_song_clip, voice_vol=0.15, silence_vol=0.4
+            )
             final_audio = CompositeAudioClip([final_audio, random_song_clip])
         except Exception as e:
             warning(f"Failed to add background song, continuing with voiceover only: {e}")
@@ -4443,17 +4488,130 @@ class YouTube:
         if subtitle_overlay_clips:
             final_clip = CompositeVideoClip([final_clip, *subtitle_overlay_clips])
 
+        export_codec, export_ffmpeg_params = self._get_video_export_settings()
         final_clip.write_videofile(
             combined_image_path,
             threads=threads,
-            codec="libx264",
+            codec=export_codec,
             audio_codec="aac",
-            ffmpeg_params=["-pix_fmt", "yuv420p", "-movflags", "+faststart"],
+            ffmpeg_params=export_ffmpeg_params,
         )
 
         success(f'Wrote Video to "{combined_image_path}"')
 
         return combined_image_path
+
+    def _ffmpeg_supports_encoder(self, encoder_name: str) -> bool:
+        """
+        Returns whether the local ffmpeg build exposes a specific encoder.
+
+        Args:
+            encoder_name (str): ffmpeg encoder name
+
+        Returns:
+            is_supported (bool): True when the encoder is available
+        """
+        normalized_name = str(encoder_name or "").strip().lower()
+        if not normalized_name:
+            return False
+
+        cache = getattr(self, "_ffmpeg_encoder_support_cache", {})
+        if normalized_name in cache:
+            return cache[normalized_name]
+
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            is_supported = normalized_name in str(result.stdout or "").lower()
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            is_supported = False
+
+        cache[normalized_name] = is_supported
+        self._ffmpeg_encoder_support_cache = cache
+        return is_supported
+
+    def _get_video_export_settings(self) -> tuple[str, list[str]]:
+        """
+        Chooses the final video encoder settings, preferring NVIDIA NVENC when
+        available and falling back to a faster libx264 preset otherwise.
+
+        Returns:
+            settings (tuple[str, list[str]]): codec and ffmpeg params
+        """
+        common_params = ["-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+
+        if self._ffmpeg_supports_encoder("h264_nvenc"):
+            if get_verbose():
+                info(" => Using NVIDIA NVENC for final video export", show_emoji=False)
+            return "h264_nvenc", common_params
+
+        if get_verbose():
+            info(" => Using libx264 veryfast preset for final video export", show_emoji=False)
+        return "libx264", ["-preset", "veryfast", *common_params]
+
+    def _apply_audio_ducking(self, voice_clip, music_clip, voice_vol=0.15, silence_vol=0.4):
+        """
+        Applies audio ducking to the music clip based on the voice clip's amplitude.
+        Music volume dips during speech and rises during pauses.
+
+        Args:
+            voice_clip: TTS AudioFileClip
+            music_clip: Background music AudioFileClip
+            voice_vol (float): Music volume multiplier when voice is active
+            silence_vol (float): Music volume multiplier during silence
+
+        Returns:
+            ducked_music: AudioFileClip with dynamic volume
+        """
+        try:
+            fps = 44100
+            voice_array = voice_clip.to_soundarray(fps=fps)
+            if voice_array.ndim > 1:
+                voice_mono = np.mean(voice_array, axis=1)
+            else:
+                voice_mono = voice_array
+
+            # Compute RMS energy in 50ms windows
+            window_size = int(fps * 0.05)
+            num_windows = len(voice_mono) // window_size
+            rms = np.array([
+                np.sqrt(np.mean(voice_mono[i * window_size:(i + 1) * window_size] ** 2))
+                for i in range(num_windows)
+            ])
+
+            # Threshold: consider speech present when RMS > 15% of max RMS
+            threshold = np.max(rms) * 0.15 if np.max(rms) > 0 else 0
+            is_speech = rms > threshold
+
+            # Build per-sample volume envelope
+            total_samples = len(voice_mono)
+            volume_envelope = np.ones(total_samples) * silence_vol
+            for i in range(num_windows):
+                start = i * window_size
+                end = min((i + 1) * window_size, total_samples)
+                if is_speech[i]:
+                    volume_envelope[start:end] = voice_vol
+
+            # Smooth the envelope to avoid clicks (100ms fade)
+            smooth_window = int(fps * 0.1)
+            if smooth_window > 1:
+                kernel = np.ones(smooth_window) / smooth_window
+                volume_envelope = np.convolve(volume_envelope, kernel, mode="same")
+
+            def ducking_filter(get_frame, t):
+                frame = get_frame(t)
+                sample_idx = int(t * fps)
+                sample_idx = min(sample_idx, len(volume_envelope) - 1)
+                return frame * volume_envelope[sample_idx]
+
+            return music_clip.fl(ducking_filter)
+        except Exception as e:
+            warning(f"Audio ducking failed, using flat volume: {e}")
+            return music_clip.fx(afx.volumex, voice_vol)
 
     def _render_video_assets(self, tts_instance: TTS) -> str:
         """
