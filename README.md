@@ -1,18 +1,38 @@
-# MoneyPrinter V2 — ahmadhozien fork
+# MoneyPrinterPro
 
-> 🍴 A modified fork of [FujiwaraChoki/MoneyPrinterV2](https://github.com/FujiwaraChoki/MoneyPrinterV2),
-> maintained by [@ahmadhozien](https://github.com/ahmadhozien) and distributed under the same
-> **AGPL-3.0** license. See [Changes in this fork](#changes-in-this-fork) and [Credits](#credits).
+> ⚡ **Automate faceless short-form video — end to end.** Give it a topic (or a trending title) and
+> MoneyPrinterPro writes the script, generates the voiceover and visuals, composites a captioned
+> vertical video, and uploads it to YouTube & TikTok. Ships with a browser studio, built-in trend
+> discovery, multi-provider AI, and first-class Arabic support.
 
-[![Based on FujiwaraChoki/MoneyPrinterV2](https://img.shields.io/badge/based_on-FujiwaraChoki%2FMoneyPrinterV2-blue?style=for-the-badge&logo=github)](https://github.com/FujiwaraChoki/MoneyPrinterV2)
+[![License: AGPL v3](https://img.shields.io/github/license/ahmadhozien/MoneyPrinterPro?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterPro/blob/main/LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues/ahmadhozien/MoneyPrinterPro?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterPro/issues)
+[![GitHub stars](https://img.shields.io/github/stars/ahmadhozien/MoneyPrinterPro?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterPro/stargazers)
 
-[![GitHub license](https://img.shields.io/github/license/ahmadhozien/MoneyPrinterV2?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterV2/blob/main/LICENSE)
-[![GitHub issues](https://img.shields.io/github/issues/ahmadhozien/MoneyPrinterV2?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterV2/issues)
-[![GitHub stars](https://img.shields.io/github/stars/ahmadhozien/MoneyPrinterV2?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterV2/stargazers)
+> Built on [FujiwaraChoki/MoneyPrinterV2](https://github.com/FujiwaraChoki/MoneyPrinterV2) —
+> an independent project under the same **AGPL-3.0** license. See [Credits](#credits).
 
-A Python 3.12 CLI (and Streamlit GUI) that automates short-form content creation and social-media
-outreach end to end: it writes the script, generates the voiceover and visuals, composites a
-captioned video, and uploads it — plus tooling for Twitter/X, affiliate marketing, and cold outreach.
+MoneyPrinterPro is a Python 3.12 app (CLI **and** Streamlit GUI) that automates short-form content
+creation and social-media outreach end to end — plus tooling for Twitter/X, affiliate marketing,
+and local-business cold outreach.
+
+## Why MoneyPrinterPro
+
+On top of the original MoneyPrinter pipeline, MoneyPrinterPro adds:
+
+- 🎛️ **Browser studio (Streamlit GUI)** — generate, preview, edit scenes, manage drafts, pick stock
+  footage, and see cost reports in the browser (`run_gui.bat` / `streamlit run app_gui.py`).
+- 🔥 **Trend discovery** — pull trending / high-engagement titles from **Reddit & YouTube** (by niche
+  or by region), then one-click seed a video around them.
+- 🌍 **First-class Arabic / MENA support** — Egyptian & MSA dialects, Arabic-aware subtitles and
+  fonts, Arabic TTS, and region/language-aware trends (works for English and other languages too).
+- 🧩 **Multi-provider** LLM / image / TTS / STT — OpenAI, OpenRouter, Pixabay, Nano Banana 2 (Gemini),
+  KittenTTS, local Whisper, AssemblyAI. Cloud calls use plain HTTP — no extra vendor SDKs.
+- 🎬 **TikTok uploader** alongside YouTube Shorts, plus Instagram/TikTok cross-posting via Post Bridge.
+- 💸 **Cost-aware** — per-provider pricing, run-cost estimates, and token-saving controls (combined
+  calls, prompt caching, output caps, bounded retries).
+- 🧱 **Robust automation** — isolated Firefox sessions, stale-lock recovery, looped stock clips so
+  scenes never freeze, and a configurable title/keyword seed.
 
 ## Features
 
@@ -20,6 +40,7 @@ captioned video, and uploads it — plus tooling for Twitter/X, affiliate market
       footage → MoviePy composite with word-by-word subtitles and sound effects → Selenium upload
       (schedulable via the built-in `scheduler`)
 - [x] **TikTok uploader** for the generated short-form videos
+- [x] **Trend discovery** (Reddit + YouTube) to seed videos around proven topics
 - [x] **Twitter/X bot** — generate and post tweets (schedulable)
 - [x] **Affiliate marketing** — scrape Amazon products, generate a pitch, share on Twitter
 - [x] **Local business outreach** — scrape Google Maps, extract emails, send cold outreach via SMTP
@@ -28,24 +49,6 @@ captioned video, and uploads it — plus tooling for Twitter/X, affiliate market
 - [x] **Multi-provider** support for LLM, image, TTS, and STT (see [Configuration](#configuration))
 - [x] **Bilingual subtitles** (English + Arabic) and per-keyword sound effects
 - [x] **Cost tracking** for paid API providers
-
-## Changes in this fork
-
-This fork adds the following on top of upstream
-[FujiwaraChoki/MoneyPrinterV2](https://github.com/FujiwaraChoki/MoneyPrinterV2):
-
-- **TikTok uploader** for the generated short-form videos, with supporting scripts.
-- **Multiple LLM/image/TTS/STT providers** — OpenAI (LLM, image, TTS), OpenRouter and Pixabay for
-  visuals, Nano Banana 2 (Gemini) image generation, local Whisper or AssemblyAI for subtitles.
-  All cloud providers are called over plain HTTP, so no extra vendor SDKs are required.
-- **YouTube pipeline improvements** — cultural-safety filtering, smarter asset selection
-  (`asset_strategy`: AI images, stock footage, or mixed), and a configurable target duration.
-- **Bilingual subtitles** — separate English and Arabic fonts with word-by-word rendering.
-- **Sound effects engine** — maps trigger words to SFX clips, with volume/offset controls.
-- **Cost tracking** — per-provider pricing in `config.json` to estimate run costs.
-- **Streamlit GUI** (`app_gui.py`) with Windows launcher scripts (`run_gui.bat`, `run_gui.ps1`).
-- **Firefox profile lock fix** across all automation classes (YouTube, Twitter, AFM, TikTok) — you
-  can now run automation while a *different* Firefox profile is open in another window.
 
 ## Prerequisites
 
@@ -66,9 +69,9 @@ Install these on your system **before** the Python steps below:
 ## Installation
 
 ```bash
-# 1. Clone this fork
-git clone https://github.com/ahmadhozien/MoneyPrinterV2.git
-cd MoneyPrinterV2
+# 1. Clone the repo
+git clone https://github.com/ahmadhozien/MoneyPrinterPro.git
+cd MoneyPrinterPro
 
 # 2. Copy the example config — you'll fill it in next (see Configuration below)
 cp config.example.json config.json          # Windows PowerShell: copy config.example.json config.json
@@ -163,7 +166,7 @@ Additional reference docs live in [docs/](docs/), including the full
 ## Contributing
 
 Issues and pull requests are welcome on
-[this fork](https://github.com/ahmadhozien/MoneyPrinterV2). Please read
+[MoneyPrinterPro](https://github.com/ahmadhozien/MoneyPrinterPro). Please read
 [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) first.
 
 ## License
@@ -175,7 +178,7 @@ run as a network service must also be made available under AGPL-3.0.
 ## Credits
 
 - Original project: [FujiwaraChoki/MoneyPrinterV2](https://github.com/FujiwaraChoki/MoneyPrinterV2)
-  by [@FujiwaraChoki](https://github.com/FujiwaraChoki) — this fork builds directly on it.
+  by [@FujiwaraChoki](https://github.com/FujiwaraChoki) — MoneyPrinterPro builds directly on it.
 - [KittenTTS](https://github.com/KittenML/KittenTTS) — local text-to-speech.
 
 ## Disclaimer
