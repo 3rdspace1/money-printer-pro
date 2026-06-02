@@ -2247,10 +2247,12 @@ class YouTube:
         if cached_entry and now_ts - int(cached_entry.get("cached_at", 0)) < 86400:
             return cached_entry.get("hits", [])
 
+        # (connect, read) timeouts: fail fast on a stalled request instead of
+        # blocking the whole asset step for up to a minute per search.
         response = requests.get(
             f"https://pixabay.com/{endpoint}/",
             params={"key": api_key, **params},
-            timeout=60,
+            timeout=(8, 20),
         )
         response.raise_for_status()
         body = response.json()
@@ -3634,9 +3636,14 @@ class YouTube:
 
         scene_intents, global_context = self._build_scene_stock_intents(scene_units, prompt_texts)
         scene_plans = []
+        total_scenes = len(scene_units)
 
         for local_scene_index, scene_text in enumerate(scene_units):
             scene_index = actual_scene_indices[local_scene_index]
+            self._emit_progress(
+                "assets_search",
+                f"Searching stock footage for scene {local_scene_index + 1}/{total_scenes}...",
+            )
             prompt_text = prompt_texts[local_scene_index] if local_scene_index < len(prompt_texts) else ""
             scene_intent = scene_intents[local_scene_index] if local_scene_index < len(scene_intents) else self._build_fallback_scene_stock_intent(
                 scene_index,
@@ -3886,7 +3893,8 @@ class YouTube:
     def _download_url_bytes(self, url: str) -> bytes | None:
         if not url:
             return None
-        response = requests.get(url, timeout=120)
+        # (connect, read) timeouts so a stalled download can't freeze the run.
+        response = requests.get(url, timeout=(8, 45))
         response.raise_for_status()
         return response.content
 
