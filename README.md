@@ -5,9 +5,9 @@
 > vertical video, and uploads it to YouTube & TikTok. Ships with a browser studio, built-in trend
 > discovery, multi-provider AI, and first-class Arabic support.
 
-[![License: AGPL v3](https://img.shields.io/github/license/ahmadhozien/MoneyPrinterPro?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterPro/blob/main/LICENSE)
-[![GitHub issues](https://img.shields.io/github/issues/ahmadhozien/MoneyPrinterPro?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterPro/issues)
-[![GitHub stars](https://img.shields.io/github/stars/ahmadhozien/MoneyPrinterPro?style=for-the-badge)](https://github.com/ahmadhozien/MoneyPrinterPro/stargazers)
+[![License: AGPL v3](https://img.shields.io/github/license/ahmadhozien/money-printer-pro?style=for-the-badge)](https://github.com/ahmadhozien/money-printer-pro/blob/main/LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues/ahmadhozien/money-printer-pro?style=for-the-badge)](https://github.com/ahmadhozien/money-printer-pro/issues)
+[![GitHub stars](https://img.shields.io/github/stars/ahmadhozien/money-printer-pro?style=for-the-badge)](https://github.com/ahmadhozien/money-printer-pro/stargazers)
 
 > Built on [FujiwaraChoki/MoneyPrinterV2](https://github.com/FujiwaraChoki/MoneyPrinterV2) —
 > an independent project under the same **AGPL-3.0** license. See [Credits](#credits).
@@ -70,8 +70,8 @@ Install these on your system **before** the Python steps below:
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/ahmadhozien/MoneyPrinterPro.git
-cd MoneyPrinterPro
+git clone https://github.com/ahmadhozien/money-printer-pro.git
+cd money-printer-pro
 
 # 2. Copy the example config — you'll fill it in next (see Configuration below)
 cp config.example.json config.json          # Windows PowerShell: copy config.example.json config.json
@@ -166,7 +166,7 @@ Additional reference docs live in [docs/](docs/), including the full
 ## Contributing
 
 Issues and pull requests are welcome on
-[MoneyPrinterPro](https://github.com/ahmadhozien/MoneyPrinterPro). Please read
+[MoneyPrinterPro](https://github.com/ahmadhozien/money-printer-pro). Please read
 [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) first.
 
 ## License
