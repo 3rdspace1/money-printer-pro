@@ -16,6 +16,34 @@ MoneyPrinterPro is a Python 3.12 app (CLI **and** Streamlit GUI) that automates 
 creation and social-media outreach end to end — plus tooling for Twitter/X, affiliate marketing,
 and local-business cold outreach.
 
+## 🎬 Example videos
+
+Fully auto-generated Arabic Shorts (click to watch):
+
+<p align="center">
+  <a href="https://youtube.com/shorts/DAKmlHHsTq4"><img src="https://img.youtube.com/vi/DAKmlHHsTq4/hqdefault.jpg" width="220" alt="Example Short 1"></a>
+  <a href="https://youtube.com/shorts/l0cUBOfN7UI"><img src="https://img.youtube.com/vi/l0cUBOfN7UI/hqdefault.jpg" width="220" alt="Example Short 2"></a>
+  <a href="https://youtube.com/shorts/OS0IqtQn1_I"><img src="https://img.youtube.com/vi/OS0IqtQn1_I/hqdefault.jpg" width="220" alt="Example Short 3"></a>
+  <a href="https://youtube.com/shorts/iDA8npQBTv4"><img src="https://img.youtube.com/vi/iDA8npQBTv4/hqdefault.jpg" width="220" alt="Example Short 4"></a>
+</p>
+
+## 🖥️ The Studio
+
+A browser dashboard to generate, find trends, preview, and publish — no terminal required.
+
+<p align="center">
+  <img src="docs/screenshots/overview.png" width="800" alt="Overview / control room"><br/>
+  <em>Control room — providers, account counts, and quick-start flow at a glance.</em>
+</p>
+<p align="center">
+  <img src="docs/screenshots/create.png" width="800" alt="YouTube studio — Create"><br/>
+  <em>YouTube studio — seed a title, override channel settings, generate or upload.</em>
+</p>
+<p align="center">
+  <img src="docs/screenshots/trends.png" width="800" alt="Trends discovery"><br/>
+  <em>Trends — pull what's trending (Reddit/YouTube, by region) and one-click seed a video.</em>
+</p>
+
 ## Why MoneyPrinterPro
 
 On top of the original MoneyPrinter pipeline, MoneyPrinterPro adds:
