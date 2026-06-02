@@ -6281,7 +6281,254 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def combine(self) -> str:
         """
-        Combines everything into the final video.
+        Combines everything into the final video. Uses the memory-light
+        streaming path by default; falls back to the legacy in-memory path
+        when youtube_low_memory_render is disabled.
+
+        Returns:
+            path (str): The path to the generated MP4 File.
+        """
+        if get_youtube_low_memory_render():
+            return self._combine_streaming()
+        return self._combine_in_memory()
+
+    def _render_scene_files(self, assets: list, scene_durations: list) -> list:
+        """
+        Renders each scene to its own 1080x1920 MP4 file, one at a time, closing
+        each clip before the next so only one scene is ever held in memory.
+
+        Args:
+            assets (list): scene-aligned visual assets
+            scene_durations (list): per-scene durations
+
+        Returns:
+            scene_paths (list[str]): rendered per-scene file paths
+        """
+        fps = get_video_fps()
+        crossfade = get_crossfade_duration()
+        total = len(assets)
+        scene_paths: list[str] = []
+
+        for index, (asset, scene_duration) in enumerate(zip(assets, scene_durations)):
+            self._emit_progress(
+                "render_scene",
+                f"Rendering scene {index + 1}/{total}...",
+                {"scene": index + 1, "total": total},
+            )
+            clip = self._build_visual_clip(asset, scene_duration)
+            if crossfade > 0 and total > 1:
+                if index > 0:
+                    clip = clip.fadein(crossfade)
+                if index < total - 1:
+                    clip = clip.fadeout(crossfade)
+
+            scene_path = self._get_workspace_path(f"scene_final_{index:02d}.mp4")
+            # Identical libx264/yuv420p/fps params across scenes so they can be
+            # concatenated losslessly with the FFmpeg concat demuxer (-c copy).
+            clip.write_videofile(
+                scene_path,
+                fps=fps,
+                codec="libx264",
+                preset="veryfast",
+                ffmpeg_params=["-pix_fmt", "yuv420p"],
+                audio=False,
+                logger=None,
+            )
+            try:
+                clip.close()
+            except Exception:
+                pass
+            scene_paths.append(scene_path)
+
+        return scene_paths
+
+    def _ffmpeg_concat_videos(self, scene_paths: list, output_path: str) -> str:
+        """
+        Concatenates same-codec scene files with the FFmpeg concat demuxer.
+        Falls back to a re-encode if a stream-copy concat fails.
+
+        Args:
+            scene_paths (list[str]): per-scene MP4 files in order
+            output_path (str): destination path
+
+        Returns:
+            output_path (str): the concatenated video path
+        """
+        list_path = self._get_workspace_path("scenes_concat_list.txt")
+        with open(list_path, "w", encoding="utf-8") as handle:
+            for path in scene_paths:
+                safe = os.path.abspath(path).replace("\\", "/").replace("'", "'\\''")
+                handle.write(f"file '{safe}'\n")
+
+        base_cmd = ["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list_path]
+        try:
+            subprocess.run(base_cmd + ["-c", "copy", output_path], check=True)
+        except subprocess.CalledProcessError:
+            # Streams weren't copy-compatible — re-encode the concatenation.
+            subprocess.run(
+                base_cmd
+                + ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", output_path],
+                check=True,
+            )
+        return output_path
+
+    def _build_final_audio_file(self, tts_clip) -> str:
+        """
+        Mixes voiceover + background song (ducked) + sound effects into a single
+        audio file. Audio is light on memory, unlike the video frames.
+
+        Args:
+            tts_clip: the voiceover AudioFileClip
+
+        Returns:
+            audio_path (str): path to the mixed audio WAV
+        """
+        audio_layers = [tts_clip.set_fps(44100)]
+
+        try:
+            random_song = choose_random_song()
+            random_song_clip = AudioFileClip(random_song).set_fps(44100)
+            random_song_clip = self._apply_audio_ducking(
+                tts_clip, random_song_clip, voice_vol=0.15, silence_vol=0.4
+            )
+            audio_layers.append(random_song_clip)
+        except Exception as exc:
+            warning(f"Failed to add background song, continuing with voiceover only: {exc}")
+
+        if get_sound_effects_enabled():
+            try:
+                sfx_clips = self._build_sound_effects_clips(self.tts_path)
+                if sfx_clips:
+                    audio_layers.extend(sfx_clips)
+                    info(f" => Added {len(sfx_clips)} sound effects to the audio mix.")
+            except Exception as exc:
+                warning(f"Failed to add sound effects: {exc}")
+
+        final_audio = CompositeAudioClip(audio_layers).set_duration(tts_clip.duration)
+        audio_path = self._get_workspace_path("final_audio.wav")
+        final_audio.write_audiofile(audio_path, fps=44100, logger=None)
+        return audio_path
+
+    def _mux_video_audio(self, video_path: str, audio_path: str, output_path: str, duration: float) -> str:
+        """
+        Muxes an audio track onto a silent video without re-encoding the video.
+
+        Args:
+            video_path (str): silent video
+            audio_path (str): audio track
+            output_path (str): destination
+            duration (float): clamp output to this duration (seconds)
+
+        Returns:
+            output_path (str)
+        """
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-v", "error",
+                "-i", video_path,
+                "-i", audio_path,
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy", "-c:a", "aac",
+                "-t", f"{max(0.1, float(duration)):.3f}",
+                "-movflags", "+faststart",
+                output_path,
+            ],
+            check=True,
+        )
+        return output_path
+
+    def _combine_streaming(self) -> str:
+        """
+        Memory-light final assembly: render each scene to a file, concatenate
+        with FFmpeg, mix audio to a file, mux, then burn subtitles. Keeps memory
+        flat regardless of scene count.
+
+        Returns:
+            path (str): the final MP4 path
+        """
+        assets = self._get_scene_aligned_assets()
+        if len(assets) == 0:
+            raise RuntimeError(
+                "No visual assets were generated, so the video cannot be combined."
+            )
+
+        combined_image_path = self._get_workspace_path("final_video.mp4")
+        tts_clip = AudioFileClip(self.tts_path)
+        max_duration = tts_clip.duration
+        scene_durations = self._get_scene_durations(max_duration)
+
+        print(colored("[+] Combining visual assets...", "blue"))
+        self._emit_progress("combine", "Combining visual assets into the final timeline.")
+
+        # 1) Render each scene to its own file and stitch them (constant memory).
+        scene_paths = self._render_scene_files(assets, scene_durations)
+        silent_video_path = self._get_workspace_path("scenes_concat.mp4")
+        self._ffmpeg_concat_videos(scene_paths, silent_video_path)
+
+        # 2) Subtitles (ASS for fast FFmpeg burning).
+        ass_subtitles_path = None
+        try:
+            subtitles_path = self.generate_subtitles(self.tts_path)
+            if self._should_equalize_subtitles():
+                equalize_subtitles(subtitles_path, 18)
+            subtitle_entries = self._parse_srt_entries_utf8(subtitles_path)
+            if not subtitle_entries:
+                raise RuntimeError("Subtitle file was empty after generation.")
+            ass_subtitles_path = self._get_workspace_path("subtitles.ass")
+            self._generate_ass_subtitles(subtitle_entries, ass_subtitles_path)
+            self._emit_progress(
+                "subtitles",
+                f"Prepared {len(subtitle_entries)} subtitle entries for FFmpeg burning.",
+                {"subtitle_entries": len(subtitle_entries), "subtitles_path": ass_subtitles_path},
+            )
+        except Exception as exc:
+            warning(f"Failed to generate subtitles, continuing without subtitles: {exc}")
+            ass_subtitles_path = None
+
+        # 3) Mix audio to a file and mux it onto the silent video.
+        audio_path = self._build_final_audio_file(tts_clip)
+        muxed_path = self._get_workspace_path("video_no_subs.mp4")
+        self._emit_progress("render", "Muxing audio onto the stitched video.")
+        self._mux_video_audio(silent_video_path, audio_path, muxed_path, tts_clip.duration)
+
+        # 4) Burn subtitles (final encode) or finish without them.
+        if ass_subtitles_path and os.path.exists(ass_subtitles_path):
+            self._emit_progress(
+                "subtitles_burn",
+                "Burning subtitles into video via FFmpeg...",
+                {"ass_path": ass_subtitles_path},
+            )
+            self._burn_subtitles_with_ffmpeg(muxed_path, ass_subtitles_path, combined_image_path)
+            try:
+                os.remove(muxed_path)
+            except OSError:
+                pass
+        else:
+            try:
+                os.replace(muxed_path, combined_image_path)
+            except OSError:
+                import shutil
+                shutil.copyfile(muxed_path, combined_image_path)
+
+        try:
+            tts_clip.close()
+        except Exception:
+            pass
+
+        success(f'Wrote Video to "{combined_image_path}"')
+        self.video_path = os.path.abspath(combined_image_path)
+        self._emit_progress(
+            "done",
+            "Finished writing the final video.",
+            {"video_path": combined_image_path},
+        )
+        self._write_workspace_state()
+        return combined_image_path
+
+    def _combine_in_memory(self) -> str:
+        """
+        Legacy in-memory assembly (composite all scene clips at once). Used when
+        youtube_low_memory_render is disabled.
 
         Returns:
             path (str): The path to the generated MP4 File.

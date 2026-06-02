@@ -184,6 +184,7 @@
     "translate": 0,
     "stock_query": 0
   },
+  "youtube_low_memory_render": true,
   "youtube_combine_metadata_and_prompts": true,
   "youtube_send_full_script_to_prompts": false,
   "youtube_template_topic": false,

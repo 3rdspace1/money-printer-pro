@@ -1148,6 +1148,19 @@ def get_youtube_template_topic() -> bool:
     """
     return bool(_read_config().get("youtube_template_topic", False))
 
+def get_youtube_low_memory_render() -> bool:
+    """
+    When True, the final video is assembled by rendering each scene to its own
+    file and stitching them with FFmpeg (constant memory), instead of holding
+    every scene clip in memory and compositing at once. Prevents out-of-memory
+    crashes on long / many-scene videos. Set False to use the legacy in-memory
+    path.
+
+    Returns:
+        enabled (bool): default True
+    """
+    return bool(_read_config().get("youtube_low_memory_render", True))
+
 def get_youtube_local_tags() -> bool:
     """
     When True, hashtags/tags are derived locally from the script/subject
