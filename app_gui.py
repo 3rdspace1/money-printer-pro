@@ -1586,7 +1586,7 @@ def render_overview() -> None:
     provider = config.get("llm_provider", "ollama")
     active_model = config.get("openai_model") if provider == "openai" else config.get("ollama_model")
     render_hero(
-        "MoneyPrinter V2 Studio",
+        "MoneyPrinterPro Studio",
         "Manage accounts, generate short-form content, review drafts, and publish across Twitter, YouTube, and TikTok from one calmer workspace.",
         chips=[
             f"LLM: {provider}",
@@ -3943,7 +3943,7 @@ def render_accounts_page() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="MoneyPrinter V2 Studio",
+        page_title="MoneyPrinterPro Studio",
         page_icon="https://img.icons8.com/fluency/48/movie-projector.png",
         layout="wide",
     )
@@ -3958,7 +3958,7 @@ def main() -> None:
             text-align: center;
         ">
             <div style="font-size: 1.35rem; font-weight: 800; color: var(--studio-ink); line-height: 1.2;">
-                MoneyPrinter V2
+                MoneyPrinterPro
             </div>
             <div style="font-size: 0.75rem; color: var(--studio-ink-soft); letter-spacing: 0.08em; text-transform: uppercase;">
                 Studio

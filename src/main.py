@@ -755,7 +755,7 @@ if __name__ == "__main__":
     first_time = get_first_time_running()
 
     if first_time:
-        print(colored("Hey! It looks like you're running MoneyPrinter V2 for the first time. Let's get you setup first!", "yellow"))
+        print(colored("Hey! It looks like you're running MoneyPrinterPro for the first time. Let's get you setup first!", "yellow"))
 
     # Setup file tree
     assert_folder_structure()

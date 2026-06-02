@@ -5027,7 +5027,7 @@ class YouTube:
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                         "HTTP-Referer": "https://openrouter.ai",
-                        "X-Title": "MoneyPrinterV2",
+                        "X-Title": "MoneyPrinterPro",
                     },
                     json=payload,
                     timeout=get_image_request_timeout(),
