@@ -1571,18 +1571,29 @@ class YouTube:
         """
         n_prompts = len(scene_units)
 
-        image_prompts = [
-            self._make_provider_friendly_image_prompt(prompt)
+        # Work on the RAW prompts first: translate before wrapping so the
+        # provider-friendly wrapper (locale prefix + cinematic boilerplate) is
+        # applied exactly once. Wrapping first and then re-wrapping the
+        # translated output buries the real per-scene content under repeated
+        # boilerplate and the 24-word cap truncates it away, collapsing every
+        # scene to the same string.
+        source_prompts = [
+            prompt
             for prompt in raw_prompts
             if isinstance(prompt, str) and prompt.strip()
         ]
 
-        if self._image_prompts_need_translation(image_prompts):
-            image_prompts = [
-                self._make_provider_friendly_image_prompt(prompt)
-                for prompt in self._translate_image_prompts_to_english(image_prompts)
+        if self._image_prompts_need_translation(source_prompts):
+            source_prompts = [
+                prompt
+                for prompt in self._translate_image_prompts_to_english(source_prompts)
                 if isinstance(prompt, str) and prompt.strip()
             ]
+
+        image_prompts = [
+            self._make_provider_friendly_image_prompt(prompt)
+            for prompt in source_prompts
+        ]
 
         if not image_prompts:
             return []
@@ -2035,6 +2046,44 @@ class YouTube:
         cleaned = re.sub(r"^\d+[\).\:-]\s*", "", cleaned)
         return cleaned.strip()
 
+    def _strip_image_prompt_boilerplate(self, prompt: str) -> str:
+        """
+        Removes the cinematic wrapper and locale boilerplate that
+        _make_provider_friendly_image_prompt adds, so re-wrapping a prompt (or
+        wrapping one where the LLM echoed the locale instruction) does not stack
+        duplicate boilerplate and starve the real scene content of its word
+        budget.
+
+        Args:
+            prompt (str): prompt that may already contain wrapper boilerplate
+
+        Returns:
+            cleaned (str): prompt with known boilerplate phrases removed
+        """
+        cleaned = str(prompt or "")
+
+        static_phrases = [
+            "vertical cinematic still image",
+            "photorealistic lighting",
+            "no readable text",
+            "no letters",
+            "no logos",
+            "no watermark",
+        ]
+
+        locale_hint = self._get_visual_locale_hint()
+        locale_phrases = [
+            part.strip()
+            for part in locale_hint.split(",")
+            if part.strip()
+        ]
+
+        for phrase in static_phrases + locale_phrases:
+            cleaned = re.sub(re.escape(phrase), " ", cleaned, flags=re.IGNORECASE)
+
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+        return cleaned
+
     def _make_provider_friendly_image_prompt(self, prompt: str) -> str:
         """
         Rewrites a raw visual prompt into a shorter, safer prompt for image
@@ -2049,6 +2098,11 @@ class YouTube:
         cleaned = self._clean_image_prompt(prompt)
         cleaned = cleaned.replace('"', "").replace("'", "")
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+
+        # Strip any wrapper/locale boilerplate the prompt may already carry
+        # (echoed by the LLM, or from a previously-wrapped value) so wrapping is
+        # idempotent and the boilerplate never consumes the word budget below.
+        cleaned = self._strip_image_prompt_boilerplate(cleaned)
 
         banned_phrases = (
             "readable text",
@@ -2375,13 +2429,24 @@ class YouTube:
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,")
         return cleaned
 
-    def _format_pixabay_q_value(self, terms: list[str], max_chars: int = 100) -> str:
+    def _format_pixabay_q_value(
+        self,
+        terms: list[str],
+        max_chars: int = 100,
+        max_words: int | None = None,
+    ) -> str:
         """
-        Builds a compact Pixabay q string using + separators.
+        Builds a compact Pixabay q string.
+
+        Pixabay matches every word in `q` with AND semantics, so each extra word
+        shrinks the result pool. Keep stock queries to a few broad words: pass
+        `max_words` to hard-cap the total word count (e.g. 2 for a broad primary
+        query, 1 for the broadest fallback).
 
         Args:
             terms (list[str]): ordered visual search terms
             max_chars (int): maximum q length
+            max_words (int | None): hard cap on total words across all terms
 
         Returns:
             q (str): Pixabay q string
@@ -2403,14 +2468,25 @@ class YouTube:
 
         q_parts: list[str] = []
         current_length = 0
+        used_words = 0
         for term in ordered_terms:
-            candidate_part = term.replace(" ", " ")
+            term_words = len(term.split())
+            if max_words is not None:
+                if used_words >= max_words:
+                    break
+                # Trim this term so the running total never exceeds the cap.
+                if used_words + term_words > max_words:
+                    term = " ".join(term.split()[: max_words - used_words])
+                    term_words = len(term.split())
+                if not term:
+                    continue
             separator_length = 1 if q_parts else 0
-            next_length = current_length + separator_length + len(candidate_part)
+            next_length = current_length + separator_length + len(term)
             if next_length > max_chars:
                 break
-            q_parts.append(candidate_part)
+            q_parts.append(term)
             current_length = next_length
+            used_words += term_words
 
         return "+".join(q_parts)
 
@@ -2442,14 +2518,16 @@ class YouTube:
                 [
                     self._derive_stock_query_from_scene(cleaned_scene, cleaned_prompt),
                     cleaned_scene,
-                ]
+                ],
+                max_words=2,
             )
             heuristic_fallback = self._format_pixabay_q_value(
                 [
                     cleaned_prompt,
                     cleaned_scene,
                     self.subject,
-                ]
+                ],
+                max_words=1,
             )
             fallback_queries[index] = {
                 "primary_q": heuristic_primary,
@@ -2478,13 +2556,18 @@ class YouTube:
         instructions = (
             "You generate Pixabay stock-footage search queries as JSON. "
             "Return ONLY a JSON array with one object per scene, each with keys "
-            "scene_index, primary_q, fallback_q. primary_q and fallback_q are "
-            "Pixabay 'q' strings joined by '+'. Rules: English only; under 100 "
-            "characters each; prefer concrete people, place, object, clothing, "
-            "and action terms; never include cinematic/style words (vertical, "
-            "photorealistic, watermark, logo, text); never repeat locale "
-            "boilerplate (e.g. 'Egyptian setting', 'Arabic-speaking environment') "
-            "unless essential; keep queries stock-search friendly, not sentences."
+            "scene_index, primary_q, fallback_q. "
+            "Pixabay matches every word with AND, so fewer words return far more "
+            "results. Make queries BROAD, not specific:\n"
+            "- primary_q: the single core visual subject in AT MOST 2 words "
+            "(e.g. 'old factory', 'empty street', 'crowded market').\n"
+            "- fallback_q: an even broader single word category (e.g. 'factory', "
+            "'street', 'market').\n"
+            "Rules: English only; no '+' or punctuation, just words separated by "
+            "spaces; never use cinematic/style words (vertical, photorealistic, "
+            "watermark, logo, text); never include locale boilerplate "
+            "(e.g. 'Egyptian setting', 'Arabic-speaking environment'); pick "
+            "concrete, common, photographable nouns — never sentences or actions."
         )
         prompt_body = (
             f"Video subject: {self._strip_pixabay_query_boilerplate(self.subject)}\n"
@@ -2524,10 +2607,12 @@ class YouTube:
                         if scene_index not in fallback_queries:
                             continue
                         primary_q = self._format_pixabay_q_value(
-                            re.split(r"\s*\+\s*", str(item.get("primary_q", "") or "").strip())
+                            re.split(r"\s*\+\s*", str(item.get("primary_q", "") or "").strip()),
+                            max_words=2,
                         )
                         fallback_q = self._format_pixabay_q_value(
-                            re.split(r"\s*\+\s*", str(item.get("fallback_q", "") or "").strip())
+                            re.split(r"\s*\+\s*", str(item.get("fallback_q", "") or "").strip()),
+                            max_words=1,
                         )
                         if primary_q:
                             fallback_queries[scene_index]["primary_q"] = primary_q
@@ -7625,37 +7710,46 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not normalized_labels:
             return None
 
-        buttons = driver.find_elements(By.XPATH, "//button | //*[@role='button']")
+        # YouTube Studio renders dialog actions as custom elements
+        # (ytcp-button / tp-yt-paper-button), not plain <button>, and the
+        # visible text can live in a nested node or only in aria-label. Search
+        # all of these and read both the rendered text and aria-label.
+        buttons = driver.find_elements(
+            By.XPATH,
+            "//button | //*[@role='button'] | //ytcp-button | //tp-yt-paper-button",
+        )
+
+        def button_texts(element) -> list[str]:
+            values = []
+            for raw in (element.text, element.get_attribute("aria-label")):
+                normalized = " ".join(str(raw or "").split()).strip().lower()
+                if normalized:
+                    values.append(normalized)
+            return values
+
+        # Pass 1: exact match (avoids matching the page's own "Publish" button
+        # when we are specifically after "Publish anyway").
         for button in buttons:
             try:
                 if not button.is_displayed():
                     continue
-                button_label = " ".join(str(button.text or "").split()).strip().lower()
-                if button_label in normalized_labels:
+                if any(text in normalized_labels for text in button_texts(button)):
                     return button
             except StaleElementReferenceException:
                 continue
 
-        return None
+        # Pass 2: substring match for when the element wraps the label in extra
+        # text/whitespace (e.g. an icon + "Publish anyway").
+        for button in buttons:
+            try:
+                if not button.is_displayed():
+                    continue
+                texts = button_texts(button)
+                if any(label in text for text in texts for label in normalized_labels):
+                    return button
+            except StaleElementReferenceException:
+                continue
 
-    def _wait_for_button_by_text(self, labels, timeout_seconds: int = 8):
-        """
-        Polls for a visible button matching one of the labels until it appears
-        or the timeout elapses.
-
-        Args:
-            labels: iterable of candidate button labels
-            timeout_seconds (int): maximum wait time
-
-        Returns:
-            element: matching Selenium element or None
-        """
-        deadline = time.time() + timeout_seconds
-        while time.time() < deadline:
-            button = self._find_visible_button_by_text(*labels)
-            if button is not None:
-                return button
-            time.sleep(0.5)
         return None
 
     def _content_checks_modal_is_open(self) -> bool:
@@ -7672,31 +7766,58 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             or "still checking your content" in page_text
         )
 
-    def _wait_for_content_checks_modal(self, timeout_seconds: int = 8) -> bool:
+    def _confirm_publish_through_content_checks(
+        self,
+        verbose: bool = False,
+        timeout_seconds: int = 45,
+    ) -> None:
         """
-        Waits briefly to see whether YouTube opens the content-check warning modal.
+        Drives the final publish past YouTube's "We're still checking your
+        content" modal.
+
+        Clicking publish while the automated checks are still running opens a
+        confirmation modal with a "Publish anyway" button. The modal can appear
+        a few seconds after the click, and clicking once is not always enough
+        (the button can be re-rendered), so poll and re-click until the modal
+        is gone or the timeout elapses.
 
         Args:
-            timeout_seconds (int): maximum wait time
+            verbose (bool): whether to log progress
+            timeout_seconds (int): maximum time to spend confirming the publish
 
         Returns:
-            is_open (bool): True when the modal becomes visible
+            None
         """
         deadline = time.time() + timeout_seconds
+        clicked = False
+
         while time.time() < deadline:
-            if self._content_checks_modal_is_open():
-                return True
+            if not self._content_checks_modal_is_open():
+                # Either the modal never appeared (checks already passed and the
+                # video published directly) or we already dismissed it.
+                if clicked and verbose:
+                    info("\t=> Content-check modal cleared; publish confirmed.")
+                return
 
-            try:
-                done_button = self.browser.find_element(By.ID, YOUTUBE_DONE_BUTTON_ID)
-                if not done_button.is_displayed():
-                    return False
-            except (NoSuchElementException, StaleElementReferenceException):
-                return False
+            publish_anyway_button = self._find_visible_button_by_text(
+                "Publish anyway", "Publish now"
+            )
+            if publish_anyway_button is not None:
+                if verbose and not clicked:
+                    info("\t=> Content-check modal appeared. Clicking 'Publish anyway'.")
+                self._click_element(publish_anyway_button)
+                clicked = True
+                time.sleep(2)
+                continue
 
+            # Modal is open but the button is not ready yet; wait and retry.
             time.sleep(1)
 
-        return self._content_checks_modal_is_open()
+        if self._content_checks_modal_is_open() and verbose:
+            warning(
+                "\t=> Content-check modal was still open after the publish "
+                "confirmation timeout."
+            )
 
     def _upload_is_saved_as_private(self, page_text: str | None = None) -> bool:
         """
@@ -7891,18 +8012,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             self._click_element(done_button)
 
-            # When the content checks are still running, YouTube opens a
-            # "Checks aren't finished — Publish anyway?" modal. Poll for the
-            # button directly (modal wording changes often, so don't rely on
-            # matching the modal text). If it never appears, the click above
-            # already published/saved the video.
-            publish_anyway_button = self._wait_for_button_by_text(
-                ("Publish anyway", "Publish now"), timeout_seconds=8
-            )
-            if publish_anyway_button is not None:
-                if verbose:
-                    info("\t=> Content-check modal appeared. Clicking 'Publish anyway'.")
-                self._click_element(publish_anyway_button)
+            # When the automated checks are still running, YouTube opens a
+            # "We're still checking your content — Publish anyway?" modal. It
+            # can appear a few seconds after the click and may need re-clicking,
+            # so confirm the publish through it with polling + retries. If the
+            # modal never appears, the click above already published the video.
+            self._confirm_publish_through_content_checks(verbose=verbose)
 
             # Wait for 2 seconds
             time.sleep(2)

@@ -8,7 +8,9 @@ platformdirs
 requests
 
 # GUI (Streamlit dashboard)
-streamlit
+# >=1.57 fixes "Bad delta path index" crash when elements render inside a
+# container within a st.spinner context (streamlit/streamlit#13658).
+streamlit>=1.57
 
 # LLM / providers (OpenAI, OpenRouter, Gemini/Nano Banana are called over raw HTTP via `requests`)
 ollama
