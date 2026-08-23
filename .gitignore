@@ -15,3 +15,5 @@ auto.sh
 debug_run_fixcheck/
 geckodriver.log
 *.log
+# BypassHormuz pipeline cache
+.bypass/

@@ -1,0 +1,54 @@
+{
+  "_comment": "Copy to config.json. Wired for the BypassHormuz daily briefing pipeline: AIMLAPI for LLM + STT, Pixabay stock footage for visuals, and the published podcast MP3 as the voiceover (no TTS spend).",
+
+  "verbose": true,
+  "headless": false,
+  "firefox_profile": "",
+
+  "llm_provider": "openai",
+  "openai_base_url": "https://api.aimlapi.com/v1",
+  "openai_api_key": "PUT_YOUR_AIMLAPI_KEY_HERE",
+  "openai_model": "openai/gpt-4.1-nano",
+  "youtube_metadata_model": "openai/gpt-4.1-nano",
+  "llm_max_output_tokens": 1200,
+  "llm_max_retries": 3,
+  "llm_prompt_caching_enabled": true,
+  "youtube_combine_metadata_and_prompts": true,
+  "youtube_send_full_script_to_prompts": false,
+
+  "_visuals": "stock keeps marginal cost at zero and suits a news briefing better than AI art. Switch asset_strategy to mixed and set an image provider if you want generated frames.",
+  "asset_strategy": "stock",
+  "image_provider": "nanobanana2",
+  "max_ai_assets": 0,
+  "pixabay_api_key": "PUT_YOUR_PIXABAY_KEY_HERE",
+  "pixabay_results_per_query": 20,
+  "min_image_prompts": 6,
+  "max_image_prompts": 14,
+
+  "_audio": "The voiceover comes from https://bypasshormuz.com/podcast/audio/{date}.mp3 via PrerecordedTTS, so tts_provider is never used by this pipeline.",
+  "tts_provider": "auto",
+
+  "_subtitles": "script_based uses the exact transcript we already hold, so no second STT pass is needed at render time.",
+  "stt_provider": "script_based",
+  "subtitle_mode": "word_by_word",
+  "subtitle_max_chunk_words": 4,
+  "subtitle_font_english": "Oswald-VariableFont_wght.ttf",
+  "subtitle_font_size": 62,
+  "subtitle_color": "#F2F5F7",
+  "subtitle_stroke_color": "#04121C",
+  "subtitle_stroke_width": 5,
+
+  "video_fps": 30,
+  "crossfade_duration": 0.35,
+  "youtube_target_duration_seconds": 55,
+  "youtube_low_memory_render": false,
+  "threads": 4,
+  "is_for_kids": false,
+
+  "sound_effects_enabled": false,
+  "youtube_local_tags": true,
+  "youtube_template_topic": "",
+  "trends_region": "NZ",
+
+  "pricing": {}
+}
