@@ -2,7 +2,6 @@ import os
 import re
 import requests
 import soundfile as sf
-from kittentts import KittenTTS as KittenModel
 
 from config import (
     ROOT_DIR,
@@ -54,7 +53,17 @@ class TTS:
         return self._synthesize_kitten(text, output_file, cost_callback=cost_callback)
 
     def _get_kitten_model(self):
+        # Imported lazily: KittenTTS is a heavy optional dependency, and
+        # pipelines that supply their own audio (or use OpenAI TTS) should be
+        # able to run without installing it at all.
         if self._model is None:
+            try:
+                from kittentts import KittenTTS as KittenModel
+            except ImportError as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "KittenTTS is not installed. Install it from requirements.txt, "
+                    "or set tts_provider to openai."
+                ) from exc
             self._model = KittenModel(KITTEN_MODEL)
         return self._model
 

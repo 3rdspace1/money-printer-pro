@@ -1,0 +1,174 @@
+name: BypassHormuz daily video
+
+# The bypass-monitor Worker publishes each briefing shortly after 00:00 UTC,
+# so 01:30 UTC gives it comfortable headroom. Cron on GitHub is best effort and
+# can drift by 10-30 minutes on a busy hour; that does not matter here.
+on:
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Episode date YYYY-MM-DD (blank = latest)"
+        required: false
+        default: ""
+      mode:
+        description: "short = ~55s cut, long = full briefing"
+        required: false
+        default: short
+        type: choice
+        options: [short, long]
+      seconds:
+        description: "Target length in short mode"
+        required: false
+        default: "55"
+      privacy:
+        description: "YouTube privacy for this run"
+        required: false
+        default: private
+        type: choice
+        options: [private, unlisted, public]
+      publish:
+        description: "Actually upload, or just build the artifact"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+concurrency:
+  group: bypass-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg imagemagick fonts-liberation
+          # ImageMagick ships a policy that blocks the @text: reads MoviePy uses
+          # for subtitle rendering. Without this, subtitle frames come out blank.
+          sudo sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' \
+            /etc/ImageMagick-6/policy.xml || true
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-ci.txt
+
+      # The transcript is the only paid step. Caching it per episode means a
+      # re-run, or a second render at a different length, costs nothing.
+      - name: Restore transcript cache
+        uses: actions/cache@v4
+        with:
+          path: .bypass
+          key: bypass-transcripts-${{ github.run_id }}
+          restore-keys: bypass-transcripts-
+
+      - name: Write config
+        env:
+          AIMLAPI_KEY: ${{ secrets.AIMLAPI_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          POST_BRIDGE_API_KEY: ${{ secrets.POST_BRIDGE_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os
+          config = json.load(open("config.bypass.example.json"))
+          config["openai_api_key"] = os.environ["AIMLAPI_KEY"]
+          config["pixabay_api_key"] = os.environ.get("PIXABAY_API_KEY", "")
+          config["imagemagick_path"] = "/usr/bin/convert"
+          config["headless"] = True
+          config["verbose"] = True
+          config["threads"] = 2
+          config["youtube_low_memory_render"] = True
+          post_bridge_key = os.environ.get("POST_BRIDGE_API_KEY", "")
+          config["post_bridge"] = {
+              "enabled": bool(post_bridge_key),
+              "api_key": post_bridge_key,
+              "platforms": ["tiktok", "instagram"],
+              "account_ids": [],
+              "auto_crosspost": True,
+          }
+          json.dump(config, open("config.json", "w"), indent=2)
+          print("config written")
+          PY
+
+      # generate_video_from_existing_script() reads the account list for niche
+      # and language only. The Firefox profile is never opened, because CI
+      # uploads through the Data API instead of Selenium.
+      - name: Seed account cache
+        run: |
+          mkdir -p ~/.config/MoneyPrinterPro
+          python - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, "src")
+          from cache import get_youtube_cache_path
+          path = get_youtube_cache_path()
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          if not os.path.exists(path):
+              json.dump({"accounts": [{
+                  "id": "bypass-ci",
+                  "nickname": "bypass",
+                  "firefox_profile": "",
+                  "niche": "geopolitics, energy security and shipping",
+                  "language": "English",
+                  "dialect": "",
+                  "character_context": "A calm, analytical geopolitical intelligence briefing.",
+                  "is_for_kids": False,
+                  "videos": [],
+              }]}, open(path, "w"), indent=2)
+          print("account cache at", path)
+          PY
+
+      - name: Render video
+        id: render
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: |
+          ARGS="--mode ${{ inputs.mode || 'short' }} --seconds ${{ inputs.seconds || '55' }} --account bypass"
+          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+          if [ "${{ inputs.publish || 'true' }}" = "true" ]; then
+            ARGS="$ARGS --upload-api --privacy ${{ inputs.privacy || 'private' }} --crosspost"
+          fi
+          echo "Running: $ARGS"
+          python scripts/bypass_daily.py $ARGS
+
+      - name: Upload video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bypass-video-${{ steps.render.outputs.episode_date || github.run_id }}
+          path: |
+            **/*.mp4
+            .bypass/*.transcript.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### BypassHormuz daily video"
+            echo ""
+            echo "- Episode: \`${{ steps.render.outputs.episode_date }}\`"
+            echo "- Mode: \`${{ inputs.mode || 'short' }}\`"
+            if [ -n "${{ steps.render.outputs.video_id }}" ]; then
+              echo "- YouTube: https://youtu.be/${{ steps.render.outputs.video_id }}"
+            else
+              echo "- YouTube: not uploaded (check the artifact)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

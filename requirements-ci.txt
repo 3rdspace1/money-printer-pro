@@ -1,0 +1,30 @@
+# CI requirements for the BypassHormuz pipeline.
+#
+# The full requirements.txt pulls Streamlit, KittenTTS, faster-whisper and
+# undetected-chromedriver. None of them are used by this pipeline: the voiceover
+# is the published podcast MP3, the transcript comes from AIMLAPI, and uploads
+# go through the Data API rather than Selenium. Dropping them takes the runner
+# install from several minutes to well under one.
+
+wheel
+requests
+termcolor
+art
+prettytable
+platformdirs
+schedule
+
+# Video pipeline
+moviepy<2  # repo uses the 1.x moviepy.editor API
+numpy
+Pillow>=10.0.0
+srt_equalizer
+arabic-reshaper
+python-bidi
+
+# Imported at module scope by classes/YouTube.py. The browser is never launched
+# in CI, so the driver binaries are not needed.
+selenium
+webdriver_manager
+assemblyai
+soundfile

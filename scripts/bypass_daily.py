@@ -107,6 +107,7 @@ def notify_webhook(url: str, narration: Narration, video_path: str, metadata: di
         "title": metadata["title"],
         "script_seconds": round(narration.duration, 1),
         "video_path": video_path,
+        "video_id": metadata.get("_video_id", ""),
         "site": SITE_URL,
     }
     try:
@@ -128,7 +129,18 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=55.0, help="Target length in short mode")
     parser.add_argument("--account", help="YouTube account nickname to render under")
     parser.add_argument("--workdir", default=".bypass", help="Cache dir for audio/transcripts")
-    parser.add_argument("--upload", action="store_true", help="Upload to YouTube after rendering")
+    parser.add_argument("--upload", action="store_true", help="Upload to YouTube via Selenium (needs a desktop Firefox profile)")
+    parser.add_argument(
+        "--upload-api",
+        action="store_true",
+        help="Upload via the YouTube Data API. This is the headless/CI path.",
+    )
+    parser.add_argument(
+        "--privacy",
+        choices=["private", "unlisted", "public"],
+        default="private",
+        help="Privacy for --upload-api. Defaults to private so an unattended run never publishes unreviewed.",
+    )
     parser.add_argument("--crosspost", action="store_true", help="Cross-post via Post Bridge")
     parser.add_argument("--webhook", help="POST a JSON summary here when done")
     parser.add_argument("--dry-run", action="store_true", help="Prepare narration only, do not render")
@@ -188,11 +200,27 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - upload is best-effort
             print(f"[youtube] upload failed: {exc}")
 
+    video_id = ""
+    if args.upload_api:
+        try:
+            from youtube_api_upload import upload_video as api_upload
+
+            video_id = api_upload(
+                video_path,
+                title=metadata["title"],
+                description=metadata["description"],
+                tags=metadata["tags"],
+                privacy_status=args.privacy,
+            )
+            print(f"[youtube-api] https://youtu.be/{video_id} ({args.privacy})")
+        except Exception as exc:  # noqa: BLE001 - upload is best-effort
+            print(f"[youtube-api] upload failed: {exc}")
+
     if args.crosspost:
         try:
             from post_bridge_integration import maybe_crosspost_youtube_short
 
-            maybe_crosspost_youtube_short(video_path, metadata["title"])
+            maybe_crosspost_youtube_short(video_path, metadata["title"], interactive=False)
             print("[postbridge] cross-post requested")
         except Exception as exc:  # noqa: BLE001
             print(f"[postbridge] failed: {exc}")
@@ -200,7 +228,14 @@ def main() -> int:
     if args.webhook:
         notify_webhook(args.webhook, narration, video_path, metadata)
 
-    print(json.dumps({"episode": episode.date, "video": video_path}, indent=2))
+    summary = {"episode": episode.date, "video": video_path, "video_id": video_id}
+    step_summary = os.environ.get("GITHUB_OUTPUT")
+    if step_summary:
+        with open(step_summary, "a", encoding="utf-8") as handle:
+            handle.write(f"video_path={video_path}\n")
+            handle.write(f"episode_date={episode.date}\n")
+            handle.write(f"video_id={video_id}\n")
+    print(json.dumps(summary, indent=2))
     return 0
 
 

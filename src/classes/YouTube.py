@@ -35,7 +35,13 @@ from typing import List
 from moviepy.editor import *
 from termcolor import colored
 from proglog import ProgressBarLogger
-from selenium_firefox import *
+try:
+    # Unused here (everything comes from selenium.webdriver directly) and
+    # incompatible with selenium 4.x. Kept tolerant so headless installs that
+    # never open a browser do not need it.
+    from selenium_firefox import *  # noqa: F401,F403
+except Exception:  # noqa: BLE001
+    pass
 from selenium import webdriver
 from moviepy.video.fx.all import crop
 from moviepy.config import change_settings

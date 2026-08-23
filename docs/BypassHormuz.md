@@ -77,3 +77,60 @@ transcript and costs nothing.
 - **Segment quality.** `pick_segment()` only ever cuts on sentence boundaries and
   skips the host intro, so a Short never opens mid-thought. Check the `--dry-run`
   output before a first unattended run.
+
+## Running it on GitHub Actions
+
+`.github/workflows/bypass-daily.yml` runs the whole thing on a hosted runner at
+01:30 UTC daily, and on demand via **Actions → BypassHormuz daily video → Run
+workflow** (with date, mode, length, privacy and a publish on/off switch).
+
+### Why CI cannot use the Selenium uploader
+
+The stock `--upload` path drives a logged-in Firefox profile. A hosted runner is
+wiped every run and Google blocks interactive sign-in from datacenter IPs, so
+that path can never work in CI. `--upload-api` uses the YouTube Data API with a
+refresh token instead. See `src/youtube_api_upload.py` for the one-time
+authorization step.
+
+### Secrets
+
+| Secret | Needed for | Notes |
+| --- | --- | --- |
+| `AIMLAPI_KEY` | transcription | required |
+| `PIXABAY_API_KEY` | stock footage | required unless you switch to AI images |
+| `YOUTUBE_CLIENT_ID` | upload | Google Cloud OAuth "Desktop app" client |
+| `YOUTUBE_CLIENT_SECRET` | upload | |
+| `YOUTUBE_REFRESH_TOKEN` | upload | from `python -m youtube_api_upload --authorize` |
+| `POST_BRIDGE_API_KEY` | TikTok/Instagram | optional |
+
+Add them under **Settings → Secrets and variables → Actions**.
+
+### What the workflow does
+
+- Installs from `requirements-ci.txt`, not `requirements.txt`. The full file
+  pulls Streamlit, KittenTTS, faster-whisper and undetected-chromedriver, none of
+  which this pipeline uses. That takes install time from minutes to seconds.
+- Relaxes the ImageMagick `@*` policy. Ubuntu ships it locked down, and MoviePy
+  renders subtitle frames through it, so without this the captions come out blank.
+- Caches `.bypass/`, so the transcript (the only paid step) is fetched once per
+  episode. Re-runs and second renders at a different length cost nothing.
+- Seeds a throwaway account cache. `generate_video_from_existing_script()` only
+  reads niche and language from it; no browser is opened.
+- Uploads the MP4 as a build artifact regardless of whether publishing
+  succeeded, so a failed upload never loses the render.
+
+### Defaults worth knowing
+
+- `privacy` defaults to **private**. An unattended run cannot publish something
+  unreviewed by accident. Flip it to `public` in the workflow inputs, or change
+  the default in the YAML, once you have watched a few.
+- `publish: false` on a manual run builds the video and skips all posting.
+- Concurrency is capped at one run, so a slow render never overlaps the next day.
+
+### Cost and limits
+
+- Free-tier Actions minutes are 2,000/month on a private repo, unlimited on a
+  public one. A ~55s render is a few minutes, so daily is comfortable either way.
+- YouTube Data API uploads cost ~1,600 units against a 10,000/day default quota,
+  so about six uploads a day before you need a quota increase.
+- If renders start timing out, raise `timeout-minutes` or drop `--seconds`.
